@@ -227,7 +227,7 @@ def get_shape():
 
 # draws text in the middle
 def draw_text_middle(text, size, color, surface):
-    font = pygame.font.Font(fontpath, size, bold=False, italic=True)
+    font = pygame.font.SysFont(None, size) if fontpath is None else pygame.font.Font(fontpath, size)
     label = font.render(text, 1, color)
 
     surface.blit(label, (top_left_x + play_width/2 - (label.get_width()/2), top_left_y + play_height/2 - (label.get_height()/2)))
@@ -306,14 +306,14 @@ def draw_window(surface, grid, score=0, last_score=0):
     surface.fill((0, 0, 0))  # fill the surface with black
 
     pygame.font.init()  # initialise font
-    font = pygame.font.Font(fontpath_mario, 65, bold=True)
+    font = pygame.font.Font(fontpath_mario, 65)    
     label = font.render('TETRIS', 1, (255, 255, 255))  # initialise 'Tetris' text with white
 
     surface.blit(label, ((top_left_x + play_width / 2) - (label.get_width() / 2), 30))  # put surface on the center of the window
 
     # current score
-    font = pygame.font.Font(fontpath, 30)
-    label = font.render('SCORE   ' + str(score) , 1, (255, 255, 255))
+    font = pygame.font.Font(fontpath, 30)  # Set size to 30
+    label = font.render('SCORE: ' + str(score), 1, (255, 255, 255))  # Define text and color    
 
     start_x = top_left_x + play_width + 50
     start_y = top_left_y + (play_height / 2 - 100)
