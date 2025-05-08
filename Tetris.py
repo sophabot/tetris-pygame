@@ -1,5 +1,16 @@
 import random
 import pygame
+import threading
+import time
+
+# Try to import speech recognition, but don't require it
+try:
+    import speech_recognition as sr
+    SPEECH_ENABLED = True
+except ImportError:
+    SPEECH_ENABLED = False
+    print("Speech recognition module not available")
+    print("Game will run without voice controls")
 
 """
 10 x 20 grid
@@ -225,12 +236,29 @@ def get_shape():
     return Piece(5, 0, random.choice(shapes))
 
 
-# draws text in the middle
+# had an error w/ this font stuff, so added a new font: 
 def draw_text_middle(text, size, color, surface):
-    font = pygame.font.SysFont(None, size) if fontpath is None else pygame.font.Font(fontpath, size)
-    label = font.render(text, 1, color)
-
-    surface.blit(label, (top_left_x + play_width/2 - (label.get_width()/2), top_left_y + play_height/2 - (label.get_height()/2)))
+    try:
+        if fontpath is None or not pygame.font.get_init():
+            # make sure font module initialized
+            pygame.font.init()
+            font = pygame.font.SysFont('arial', size)
+        else:
+            # custom font
+            try:
+                font = pygame.font.Font(fontpath, size)
+            except (pygame.error, FileNotFoundError):
+                # fallback to system font if custom font fails
+                pygame.font.init()
+                font = pygame.font.SysFont('arial', size)
+                
+        label = font.render(text, 1, color)
+        surface.blit(label, (top_left_x + play_width/2 - (label.get_width()/2), 
+                            top_left_y + play_height/2 - (label.get_height()/2)))
+                            
+    except Exception as e:
+        print(f"Error rendering text: {e}")
+        pygame.font.init()
 
 
 # draws the lines of the grid for the game
@@ -367,6 +395,62 @@ def get_max_score():
     return score
 
 
+# handle speech recognition and spoken commands
+def listen_for_commands(command_queue):
+    try:
+        import speech_recognition as sr
+        recognizer = sr.Recognizer()
+        
+        # Initialize the recognizer and microphone
+        try:
+            with sr.Microphone() as source:
+                print("Calibrating microphone for ambient noise...")
+                recognizer.adjust_for_ambient_noise(source, duration=1)
+                print("Speech recognition ready!")
+            
+            # speech recognition is available
+            while True:
+                try:
+                    with sr.Microphone() as source:
+                        audio = recognizer.listen(source, timeout=1, phrase_time_limit=2)
+                        
+                    try:
+                        # Google speech recognition
+                        text = recognizer.recognize_google(audio).lower()
+                        print(f"Recognized: {text}")
+                        
+                        # Recognize available block commands to add to the command queue
+                        if "left" in text:
+                            command_queue.append("left")
+                        elif "right" in text:
+                            command_queue.append("right")
+                        elif "down" in text:
+                            command_queue.append("down")
+                        elif "rotate" in text or "up" in text:
+                            command_queue.append("rotate")
+                        elif "start" in text or "begin" in text:
+                            command_queue.append("start")
+                        elif "quit" in text or "exit" in text:
+                            command_queue.append("quit")
+                            
+                    except sr.UnknownValueError:
+                        pass  # Speech wasn't understood
+                    except sr.RequestError:
+                        print("Could not request results from speech recognition service")
+                        
+                except Exception as e:
+                    # Handle timeout or other listening errors silently
+                    pass
+                    
+        except Exception as e:
+            print(f"Microphone not available: {e}")
+            print("Speech recognition disabled")
+            
+    except ImportError:
+        print("Speech recognition module not available")
+        print("Speech recognition disabled")
+
+
 def main(window):
     locked_positions = {}
     create_grid(locked_positions)
@@ -381,6 +465,15 @@ def main(window):
     level_time = 0
     score = 0
     last_score = get_max_score()
+
+    command_queue = []
+
+    # Start speech recognition thread if available, not required tho
+    try:
+        threading.Thread(target=listen_for_commands, args=(command_queue,), daemon=True).start()
+    except Exception as e:
+        print(f"Could not start speech recognition: {e}")
+        print("Game will continue without voice controls")
 
     while run:
         # need to constantly make new grid as locked positions always change
@@ -437,6 +530,28 @@ def main(window):
                     if not valid_space(current_piece, grid):
                         current_piece.rotation = current_piece.rotation - 1 % len(current_piece.shape)
 
+        # process speech commands
+        while command_queue:
+            command = command_queue.pop(0)
+            if command == "left":
+                current_piece.x -= 1
+                if not valid_space(current_piece, grid):
+                    current_piece.x += 1
+            elif command == "right":
+                current_piece.x += 1
+                if not valid_space(current_piece, grid):
+                    current_piece.x -= 1
+            elif command == "down":
+                current_piece.y += 1
+                if not valid_space(current_piece, grid):
+                    current_piece.y -= 1
+            elif command == "rotate":
+                current_piece.rotation = current_piece.rotation + 1 % len(current_piece.shape)
+                if not valid_space(current_piece, grid):
+                    current_piece.rotation = current_piece.rotation - 1 % len(current_piece.shape)
+            elif command == "quit":
+                run = False
+
         piece_pos = convert_shape_format(current_piece)
 
         # draw the piece on the grid by giving color in the piece locations
@@ -472,16 +587,53 @@ def main(window):
 
 
 def main_menu(window):
+    # pygame init
+    if not pygame.get_init():
+        pygame.init()
+    
+    # had problems so font module init
+    if not pygame.font.get_init():
+        pygame.font.init()
+    
     run = True
+    command_queue = []
+    
+    # speech recognition thread for menu, optional
+    try:
+        threading.Thread(target=listen_for_commands, args=(command_queue,), daemon=True).start()
+        voice_enabled = True
+    except Exception as e:
+        print(f"Could not start speech recognition: {e}")
+        print("Continue without voice controls")
+        voice_enabled = False
+    
     while run:
-        draw_text_middle('Press any key to begin', 50, (255, 255, 255), window)
+        window.fill((0, 0, 0))  # Clear screen with black background
+        
+        # Don't show say text if you can't use voice commands
+        if voice_enabled:
+            draw_text_middle('Press any key or say START to begin', 50, (255, 255, 255), window)
+        else:
+            draw_text_middle('Press any key to begin', 50, (255, 255, 255), window)
+            
         pygame.display.update()
+        
+        # voice commands in menu if available
+        while command_queue:
+            command = command_queue.pop(0)
+            if command == "start":
+                main(window)  # Start game with voice
+            elif command == "quit":
+                run = False
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 run = False
             elif event.type == pygame.KEYDOWN:
                 main(window)
+                
+        # delay to prevent high CPU usage
+        pygame.time.delay(100)
 
     pygame.quit()
 
