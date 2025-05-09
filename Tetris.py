@@ -459,7 +459,7 @@ def listen_for_commands(command_queue):
                                 last_command = "right"
                                 last_command_time = current_time
                             elif ("down" in text or text == "d") and (last_command != "down" or current_time - last_command_time > 0.3):
-                                command_queue.append("down")
+                                command_queue.append("hard_drop") 
                                 last_command = "down"
                                 last_command_time = current_time
                             elif ("up" in text or text == "u" or "rotate" in text) and (last_command != "rotate" or current_time - last_command_time > 0.3):
@@ -488,6 +488,15 @@ def listen_for_commands(command_queue):
         print("pip install SpeechRecognition and PyAudio")
 
 
+def hard_drop(piece, grid):
+    current_y = piece.y
+    while valid_space(piece, grid):
+        piece.y += 1
+    
+    piece.y -= 1
+    return piece.y > current_y 
+
+
 def main(window, command_queue=None, existing_speech_thread=None):
     locked_positions = {}
     create_grid(locked_positions)
@@ -498,7 +507,7 @@ def main(window, command_queue=None, existing_speech_thread=None):
     next_piece = get_shape()
     clock = pygame.time.Clock()
     fall_time = 0
-    fall_speed = 0.9# fall speed of the piece
+    fall_speed = 0.8# fall speed of the piece
     level_time = 0
     score = 0
     last_score = get_max_score()
@@ -559,10 +568,11 @@ def main(window, command_queue=None, existing_speech_thread=None):
                         current_piece.x -= 1
 
                 elif event.key == pygame.K_DOWN:
-                    # move shape down
-                    current_piece.y += 1
-                    if not valid_space(current_piece, grid):
-                        current_piece.y -= 1
+                    # move shape all the way down
+                    while valid_space(current_piece, grid):
+                        current_piece.y += 1
+                    current_piece.y -= 1  
+                    change_piece = True  # lock the piece immediately after hard drop
 
                 elif event.key == pygame.K_UP:
                     # rotate shape
@@ -587,10 +597,12 @@ def main(window, command_queue=None, existing_speech_thread=None):
             if not valid_space(current_piece, grid):
                 current_piece.x -= 1
 
-        if "down" in commands_to_process:
-            current_piece.y += 1
-            if not valid_space(current_piece, grid):
-                current_piece.y -= 1
+        if "down" in commands_to_process or "hard_drop" in commands_to_process:
+            # move shape all the way down
+            while valid_space(current_piece, grid):
+                current_piece.y += 1
+            current_piece.y -= 1  # Move back up one step - we went too far
+            change_piece = True  # Lock the piece immediately after hard drop
 
         if "rotate" in commands_to_process:
             current_piece.rotation = current_piece.rotation + 1 % len(current_piece.shape)
