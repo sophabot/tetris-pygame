@@ -635,13 +635,9 @@ def main(window, command_queue=None, existing_speech_thread=None):
 
 
 def main_menu(window):
-    # pygame init
-    if not pygame.get_init():
-        pygame.init()
-    
-    # had problems so font module init
-    if not pygame.font.get_init():
-        pygame.font.init()
+    # Make sure pygame is fully initialized before doing anything
+    pygame.init()
+    pygame.font.init()
     
     run = True
     command_queue = []
@@ -691,7 +687,19 @@ def main_menu(window):
 
 
 if __name__ == '__main__':
+    # Initialize pygame first
+    pygame.init()
+    pygame.font.init()
+    
+    # Then create the display window
     win = pygame.display.set_mode((s_width, s_height))
     pygame.display.set_caption('Tetris')
 
-    main_menu(win)  # start game
+    try:
+        # Start the game
+        main_menu(win)
+    except Exception as e:
+        print(f"Game error: {e}")
+    finally:
+        # Make sure pygame quits properly
+        pygame.quit()
