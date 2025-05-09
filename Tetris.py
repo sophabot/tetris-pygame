@@ -397,61 +397,83 @@ def get_max_score():
 
 # handle speech recognition and spoken commands
 def listen_for_commands(command_queue):
+    print("Starting speech recognition")
     try:
         import speech_recognition as sr
         recognizer = sr.Recognizer()
+
+        # setting up the recognizer to be more sensitive
+        recognizer.energy_threshold = 100 
+        recognizer.dynamic_energy_threshold = True
+        recognizer.dynamic_energy_adjustment_damping = 0.5  
+        recognizer.dynamic_energy_ratio = 1.2  # More sensitive
         
-        # Initialize the recognizer and microphone
+        # init recognizer and mic
         try:
             with sr.Microphone() as source:
                 print("Calibrating microphone for ambient noise...")
-                recognizer.adjust_for_ambient_noise(source, duration=1)
-                print("Speech recognition ready!")
+                # Longer calibration for better sensitivity
+                recognizer.adjust_for_ambient_noise(source, duration=3)
+                print(f"Energy threshold set to: {recognizer.energy_threshold}")
+                # Better command examples - single letters
+                print("Speech recognition ready! Say commands: 'L', 'R', 'DOWN', 'UP'")
+                print("Listening for commands...")
             
             # speech recognition is available
             while True:
                 try:
                     with sr.Microphone() as source:
-                        audio = recognizer.listen(source, timeout=1, phrase_time_limit=2)
+                        # short timeout
+                        audio = recognizer.listen(source, timeout=0.5, phrase_time_limit=1)
+                        print("Audio detected!")
                         
-                    try:
-                        # Google speech recognition
-                        text = recognizer.recognize_google(audio).lower()
-                        print(f"Recognized: {text}")
+                    try: # speech recognizer 
+                        text = recognizer.recognize_google(audio, language="en-US")
+                        print(f"{text}")
+                        print(f"DEBUG - Recognized: '{text}'")
                         
-                        # Recognize available block commands to add to the command queue
-                        if "left" in text:
+                        # single-letter commands for the most common actions (recognizer not super reliable)
+                        if "l" in text or "left" in text:
+                            print("DEBUG - Command detected: LEFT")
                             command_queue.append("left")
-                        elif "right" in text:
+                        elif ("r" in text and "s" not in text) or "right" in text:
+                            print("DEBUG - Command detected: RIGHT")
                             command_queue.append("right")
-                        elif "down" in text:
+                        elif "d" in text or "down" in text:
+                            print("DEBUG - Command detected: DOWN")
                             command_queue.append("down")
-                        elif "rotate" in text or "up" in text:
+                        elif "u" in text or "up" in text or "rotate" in text:
+                            print("DEBUG - Command detected: UP/ROTATE")
                             command_queue.append("rotate")
-                        elif "start" in text or "begin" in text:
+                        elif "s" in text or "start" in text:
+                            print("DEBUG - Command detected: START")
                             command_queue.append("start")
-                        elif "quit" in text or "exit" in text:
+                        elif "q" in text or "quit" in text:
+                            print("DEBUG - Command detected: QUIT")
                             command_queue.append("quit")
+                        else:
+                            pass
                             
                     except sr.UnknownValueError:
-                        pass  # Speech wasn't understood
-                    except sr.RequestError:
-                        print("Could not request results from speech recognition service")
+                        print("DEBUG - Audio unintelligible")
+                    except sr.RequestError as e:
+                        print(f"DEBUG - API request error: {e}")
                         
                 except Exception as e:
-                    # Handle timeout or other listening errors silently
-                    pass
+                    if not str(e).startswith("listening timed out"):
+                        print(f"DEBUG - Listening error: {e}")
+                    time.sleep(0.05) # delay for errors
                     
         except Exception as e:
-            print(f"Microphone not available: {e}")
-            print("Speech recognition disabled")
+            print(f"DEBUG - Microphone error: {e}")
+            print("Speech recognition disabled due to microphone issue")
             
-    except ImportError:
-        print("Speech recognition module not available")
-        print("Speech recognition disabled")
+    except ImportError as e:
+        print(f"DEBUG - Import error: {e}")
+        print("pip install SpeechRecognition and PyAudio")
 
 
-def main(window):
+def main(window, command_queue=None, existing_speech_thread=None):
     locked_positions = {}
     create_grid(locked_positions)
 
@@ -461,19 +483,22 @@ def main(window):
     next_piece = get_shape()
     clock = pygame.time.Clock()
     fall_time = 0
-    fall_speed = 0.35
+    fall_speed = 0.9# fall speed of the piece
     level_time = 0
     score = 0
     last_score = get_max_score()
 
-    command_queue = []
+    # Use existing command queue if provided, otherwise create a new one
+    if command_queue is None:
+        command_queue = []
 
-    # Start speech recognition thread if available, not required tho
-    try:
-        threading.Thread(target=listen_for_commands, args=(command_queue,), daemon=True).start()
-    except Exception as e:
-        print(f"Could not start speech recognition: {e}")
-        print("Game will continue without voice controls")
+    # Start speech recognition thread ONLY if we don't already have one
+    if existing_speech_thread is None:
+        try:
+            threading.Thread(target=listen_for_commands, args=(command_queue,), daemon=True).start()
+        except Exception as e:
+            print(f"Could not start speech recognition: {e}")
+            print("Game will continue without voice controls")
 
     while run:
         # need to constantly make new grid as locked positions always change
@@ -486,7 +511,7 @@ def main(window):
 
         clock.tick()  # updates clock
 
-        if level_time/1000 > 5:    # make the difficulty harder every 10 seconds
+        if level_time/1000 > 5:    # make the difficulty harder every 5 seconds
             level_time = 0
             if fall_speed > 0.15:   # until fall speed is 0.15
                 fall_speed -= 0.005
@@ -530,27 +555,35 @@ def main(window):
                     if not valid_space(current_piece, grid):
                         current_piece.rotation = current_piece.rotation - 1 % len(current_piece.shape)
 
-        # process speech commands
+        # process speech commands if available
+        commands_to_process = []
         while command_queue:
             command = command_queue.pop(0)
-            if command == "left":
-                current_piece.x -= 1
-                if not valid_space(current_piece, grid):
-                    current_piece.x += 1
-            elif command == "right":
+            commands_to_process.append(command)
+
+        # Now execute all unique commands efficiently
+        if "left" in commands_to_process:
+            current_piece.x -= 1
+            if not valid_space(current_piece, grid):
                 current_piece.x += 1
-                if not valid_space(current_piece, grid):
-                    current_piece.x -= 1
-            elif command == "down":
-                current_piece.y += 1
-                if not valid_space(current_piece, grid):
-                    current_piece.y -= 1
-            elif command == "rotate":
-                current_piece.rotation = current_piece.rotation + 1 % len(current_piece.shape)
-                if not valid_space(current_piece, grid):
-                    current_piece.rotation = current_piece.rotation - 1 % len(current_piece.shape)
-            elif command == "quit":
-                run = False
+
+        if "right" in commands_to_process:
+            current_piece.x += 1
+            if not valid_space(current_piece, grid):
+                current_piece.x -= 1
+
+        if "down" in commands_to_process:
+            current_piece.y += 1
+            if not valid_space(current_piece, grid):
+                current_piece.y -= 1
+
+        if "rotate" in commands_to_process:
+            current_piece.rotation = current_piece.rotation + 1 % len(current_piece.shape)
+            if not valid_space(current_piece, grid):
+                current_piece.rotation = current_piece.rotation - 1 % len(current_piece.shape)
+
+        if "quit" in commands_to_process:
+            run = False
 
         piece_pos = convert_shape_format(current_piece)
 
@@ -597,10 +630,12 @@ def main_menu(window):
     
     run = True
     command_queue = []
+    speech_thread = None
     
     # speech recognition thread for menu, optional
     try:
-        threading.Thread(target=listen_for_commands, args=(command_queue,), daemon=True).start()
+        speech_thread = threading.Thread(target=listen_for_commands, args=(command_queue,), daemon=True)
+        speech_thread.start()
         voice_enabled = True
     except Exception as e:
         print(f"Could not start speech recognition: {e}")
@@ -619,10 +654,11 @@ def main_menu(window):
         pygame.display.update()
         
         # voice commands in menu if available
-        while command_queue:
+        if command_queue:
             command = command_queue.pop(0)
             if command == "start":
-                main(window)  # Start game with voice
+                # Pass the existing command queue to main to avoid creating a new thread
+                main(window, command_queue, speech_thread)
             elif command == "quit":
                 run = False
 
@@ -630,7 +666,8 @@ def main_menu(window):
             if event.type == pygame.QUIT:
                 run = False
             elif event.type == pygame.KEYDOWN:
-                main(window)
+                # Pass the existing command queue to main to avoid creating a new thread
+                main(window, command_queue, speech_thread)
                 
         # delay to prevent high CPU usage
         pygame.time.delay(100)
