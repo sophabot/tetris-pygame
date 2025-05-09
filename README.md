@@ -9,9 +9,10 @@ Run the following in the terminal to install the Pygame library
 ```
 pip install pygame
 
-pip install SpeechRecognition
+pip install openai-whisper
 
 pip install PyAudio
+pip install vosk
 ```
 
 

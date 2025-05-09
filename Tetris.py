@@ -2,15 +2,14 @@ import random
 import pygame
 import threading
 import time
+import os
+import json  # Add this as it's needed for JSON parsing
 
-# Try to import speech recognition, but don't require it
-try:
-    import speech_recognition as sr
-    SPEECH_ENABLED = True
-except ImportError:
-    SPEECH_ENABLED = False
-    print("Speech recognition module not available")
-    print("Game will run without voice controls")
+
+import vosk
+
+
+import speech_recognition as sr
 
 """
 10 x 20 grid
@@ -399,74 +398,90 @@ def get_max_score():
 def listen_for_commands(command_queue):
     print("Starting speech recognition")
     try:
-        import speech_recognition as sr
-        recognizer = sr.Recognizer()
-
-        # setting up the recognizer to be more sensitive
-        recognizer.energy_threshold = 100 
-        recognizer.dynamic_energy_threshold = True
-        recognizer.dynamic_energy_adjustment_damping = 0.5  
-        recognizer.dynamic_energy_ratio = 1.2  # More sensitive
-        
-        # init recognizer and mic
+        print("Vosk speech recognition enabled")
         try:
-            with sr.Microphone() as source:
-                print("Calibrating microphone for ambient noise...")
-                # Longer calibration for better sensitivity
-                recognizer.adjust_for_ambient_noise(source, duration=3)
-                print(f"Energy threshold set to: {recognizer.energy_threshold}")
-                # Better command examples - single letters
-                print("Speech recognition ready! Say commands: 'L', 'R', 'DOWN', 'UP'")
-                print("Listening for commands...")
+            # Try different model paths or download if needed
+            model_path = "model"
+            if not os.path.exists(model_path):
+                print("Downloading Vosk model...")
+                import urllib.request
+                import zipfile
+                    
+                # Download small English model
+                url = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
+                zip_path = "vosk-model.zip"
+                urllib.request.urlretrieve(url, zip_path)
+                    
+                # Extract and rename
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    zip_ref.extractall("./")
+                os.rename("vosk-model-small-en-us-0.15", "model")
+                os.remove(zip_path)
+                print("Model downloaded and extracted")
+                    
+            model = vosk.Model(model_path)
+            # fast response for recog
+            recognizer = vosk.KaldiRecognizer(model, 16000)
             
-            # speech recognition is available
+            vosk.SetLogLevel(-1)  # Disable non-critical logs
+                
+            import pyaudio
+            p = pyaudio.PyAudio()
+            # smaller buffer sizes for more responsive recognition
+            stream = p.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True, frames_per_buffer=2000)
+            stream.start_stream()
+            
+            # avoid duplicate commands
+            last_command = None
+            last_command_time = 0
+            
             while True:
                 try:
-                    with sr.Microphone() as source:
-                        # short timeout
-                        audio = recognizer.listen(source, timeout=0.5, phrase_time_limit=1)
-                        print("Audio detected!")
+                    # read smaller chunks for quicker response
+                    data = stream.read(2000, exception_on_overflow=False)
+                    if recognizer.AcceptWaveform(data):
+                        result = json.loads(recognizer.Result())
+                        text = result.get("text", "").lower()
                         
-                    try: # speech recognizer 
-                        text = recognizer.recognize_google(audio, language="en-US")
-                        print(f"{text}")
-                        print(f"DEBUG - Recognized: '{text}'")
-                        
-                        # single-letter commands for the most common actions (recognizer not super reliable)
-                        if "l" in text or "left" in text:
-                            print("DEBUG - Command detected: LEFT")
-                            command_queue.append("left")
-                        elif ("r" in text and "s" not in text) or "right" in text:
-                            print("DEBUG - Command detected: RIGHT")
-                            command_queue.append("right")
-                        elif "d" in text or "down" in text:
-                            print("DEBUG - Command detected: DOWN")
-                            command_queue.append("down")
-                        elif "u" in text or "up" in text or "rotate" in text:
-                            print("DEBUG - Command detected: UP/ROTATE")
-                            command_queue.append("rotate")
-                        elif "s" in text or "start" in text:
-                            print("DEBUG - Command detected: START")
-                            command_queue.append("start")
-                        elif "q" in text or "quit" in text:
-                            print("DEBUG - Command detected: QUIT")
-                            command_queue.append("quit")
-                        else:
-                            pass
+                        # process if we have actual text
+                        if text:
+                            print(f"Recognized: '{text}'")
                             
-                    except sr.UnknownValueError:
-                        print("DEBUG - Audio unintelligible")
-                    except sr.RequestError as e:
-                        print(f"DEBUG - API request error: {e}")
-                        
-                except Exception as e:
-                    if not str(e).startswith("listening timed out"):
-                        print(f"DEBUG - Listening error: {e}")
-                    time.sleep(0.05) # delay for errors
-                    
+                            # avoid dupes
+                            current_time = time.time()
+                            
+                            if ("left" in text or text == "l") and (last_command != "left" or current_time - last_command_time > 0.3):
+                                command_queue.append("left")
+                                last_command = "left"
+                                last_command_time = current_time
+                            elif ("right" in text or text == "r") and (last_command != "right" or current_time - last_command_time > 0.3):
+                                command_queue.append("right")
+                                last_command = "right"
+                                last_command_time = current_time
+                            elif ("down" in text or text == "d") and (last_command != "down" or current_time - last_command_time > 0.3):
+                                command_queue.append("down")
+                                last_command = "down"
+                                last_command_time = current_time
+                            elif ("up" in text or text == "u" or "rotate" in text) and (last_command != "rotate" or current_time - last_command_time > 0.3):
+                                command_queue.append("rotate")
+                                last_command = "rotate"
+                                last_command_time = current_time
+                            elif ("start" in text or text == "s") and (last_command != "start" or current_time - last_command_time > 0.3):
+                                command_queue.append("start")
+                                last_command = "start"
+                                last_command_time = current_time
+                            elif ("quit" in text or text == "q") and (last_command != "quit" or current_time - last_command_time > 0.3):
+                                command_queue.append("quit")
+                                last_command = "quit"
+                                last_command_time = current_time
+                except IOError:
+                    pass
+                
+                # prevent cpu overlaod
+                time.sleep(0.01)
+                
         except Exception as e:
-            print(f"DEBUG - Microphone error: {e}")
-            print("Speech recognition disabled due to microphone issue")
+            print(f"Vosk error: {e}")
             
     except ImportError as e:
         print(f"DEBUG - Import error: {e}")
