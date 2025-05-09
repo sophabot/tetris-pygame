@@ -1,5 +1,6 @@
 # Tetris
 Tetris game made with the Pygame library in Python.
+WITH OUR ADDED VOICE COMMAND FEATURE!
 
 
 ## Installing
